@@ -1,0 +1,54 @@
+name: Production Release
+
+# Release workflow - triggered when a GitHub Release is published
+# Builds and pushes container images with semantic version tags
+#
+# Example: Creating release v1.2.3 produces tags:
+#   - 1.2.3 (exact version)
+#   - 1.2   (minor version)
+#   - 1     (major version)
+#   - latest
+#
+# Pre-release v1.2.3-beta.1 produces:
+#   - 1.2.3-beta.1 (exact version)
+#   - beta          (channel tag)
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and Push Release Container
+        id: build
+        uses: wgtechlabs/container-build-flow-action@v1
+        with:
+          # Registry credentials
+          registry: 'both'
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+          # Security - fail on vulnerabilities for production releases
+          image-scan-enabled: 'true'
+          fail-on-vulnerability: 'true'
+
+      - name: Display Release Results
+        run: |
+          echo "Release published successfully!"
+          echo "Version: ${{ steps.build.outputs.release-version }}"
+          echo "Flow Type: ${{ steps.build.outputs.build-flow-type }}"
+          echo "Image Tags: ${{ steps.build.outputs.image-tags }}"
+          echo ""
+          echo "Pull commands:"
+          echo "${{ steps.build.outputs.registry-urls }}"

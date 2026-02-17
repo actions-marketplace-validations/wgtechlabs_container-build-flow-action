@@ -1,7 +1,7 @@
 {
   "name": "container-build-flow-action",
   "version": "1.0.0",
-  "description": "Automated Docker/Container builds with PR/WIP/DEV/PATCH flow support",
+  "description": "Automated Docker/Container builds with PR/WIP/DEV/PATCH/Release flow support",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

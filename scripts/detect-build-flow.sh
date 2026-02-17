@@ -13,17 +13,20 @@
 #   - patch-{sha}   : Pull request to main (not from dev)
 #   - staging-{sha} : Push to main branch (pre-production)
 #   - wip-{sha}     : Work in progress (other branches)
+#   - release        : GitHub Release (version tags: 1.2.3, 1.2, 1, latest)
 #
 # Usage:
 #   Called automatically by GitHub Actions composite action
 #   Environment variables are set by action.yml
 #
 # Outputs (via GitHub Actions):
-#   - build-flow-type : The detected flow type
-#   - tags            : Generated container tags
-#   - short-sha       : Short commit SHA
-#   - dockerhub-image : Docker Hub image name
-#   - ghcr-image      : GHCR image name
+#   - build-flow-type  : The detected flow type
+#   - tags             : Generated container tag (primary)
+#   - extra-tags       : Additional tags for release flows (multi-line type=raw)
+#   - short-sha        : Short commit SHA
+#   - release-version  : Clean version string (release only)
+#   - dockerhub-image  : Docker Hub image name
+#   - ghcr-image       : GHCR image name
 # =============================================================================
 
 set -euo pipefail
@@ -39,6 +42,10 @@ GITHUB_SHA="${GITHUB_SHA:-}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
 GITHUB_HEAD_REF="${GITHUB_HEAD_REF:-}"
 GITHUB_BASE_REF="${GITHUB_BASE_REF:-}"
+
+# Release context (from action.yml)
+RELEASE_TAG="${RELEASE_TAG:-}"
+RELEASE_PRERELEASE="${RELEASE_PRERELEASE:-false}"
 
 # User-configurable inputs (from action.yml)
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
@@ -95,6 +102,29 @@ sanitize_branch_name() {
     local branch="$1"
     # Replace slashes and special characters with hyphens
     echo "$branch" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/--*/-/g' | tr '[:upper:]' '[:lower:]'
+}
+
+# Extract prerelease identifier from semver (e.g., "beta" from "1.2.3-beta.1")
+extract_prerelease_id() {
+    local version="$1"
+    if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-([a-zA-Z][0-9A-Za-z-]*) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    else
+        echo ""
+    fi
+}
+
+# Parse semver components (major, minor, patch) from a version string
+# Sets SEMVER_MAJOR, SEMVER_MINOR, SEMVER_PATCH
+parse_semver() {
+    local version="$1"
+    if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        SEMVER_MAJOR="${BASH_REMATCH[1]}"
+        SEMVER_MINOR="${BASH_REMATCH[2]}"
+        SEMVER_PATCH="${BASH_REMATCH[3]}"
+        return 0
+    fi
+    return 1
 }
 
 # =============================================================================
@@ -199,6 +229,27 @@ detect_build_flow() {
             log_warning "Flow: Work in progress branch push"
         fi
         
+    elif [ "$GITHUB_EVENT_NAME" = "release" ]; then
+        log_info "Release event detected"
+
+        log_debug "  Release Tag: ${RELEASE_TAG}"
+        log_debug "  Pre-release: ${RELEASE_PRERELEASE}"
+
+        # Strip leading 'v' from semver-style tags (v1.2.3 -> 1.2.3)
+        if [[ "$RELEASE_TAG" =~ ^v[0-9] ]]; then
+            release_version="${RELEASE_TAG#v}"
+        else
+            release_version="$RELEASE_TAG"
+        fi
+
+        flow_type="release"
+
+        if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            log_success "Flow: Pre-release (${release_version})"
+        else
+            log_success "Flow: Production release (${release_version})"
+        fi
+
     else
         # Fallback for other events
         flow_type="wip"
@@ -208,21 +259,60 @@ detect_build_flow() {
     # =============================================================================
     # TAG GENERATION
     # =============================================================================
-    
+
     log_info "Generating container tags..."
-    
-    local base_tag="${flow_type}-${short_sha}"
-    local full_tag="${TAG_PREFIX}${base_tag}${TAG_SUFFIX}"
-    
-    log_debug "  Base tag: ${base_tag}"
-    log_debug "  Full tag: ${full_tag}"
-    
+
+    local full_tag=""
+    local extra_tags=""
+
+    if [ "$flow_type" = "release" ]; then
+        # Release flow: generate version-based tags
+        full_tag="${TAG_PREFIX}${release_version}${TAG_SUFFIX}"
+
+        log_debug "  Primary tag: ${full_tag}"
+
+        # Generate additional tags for releases
+        if parse_semver "$release_version"; then
+            if [ "$RELEASE_PRERELEASE" = "true" ]; then
+                # Pre-release: add channel tag (e.g., "beta" from "1.2.3-beta.1")
+                local prerelease_id
+                prerelease_id=$(extract_prerelease_id "$release_version")
+                if [ -n "$prerelease_id" ]; then
+                    extra_tags="type=raw,value=${TAG_PREFIX}${prerelease_id}${TAG_SUFFIX}"
+                    log_debug "  Pre-release channel tag: ${prerelease_id}"
+                fi
+            else
+                # Standard release: add major, minor, and latest tags
+                extra_tags="type=raw,value=${TAG_PREFIX}${SEMVER_MAJOR}.${SEMVER_MINOR}${TAG_SUFFIX}"
+                extra_tags="${extra_tags}
+type=raw,value=${TAG_PREFIX}${SEMVER_MAJOR}${TAG_SUFFIX}"
+                extra_tags="${extra_tags}
+type=raw,value=${TAG_PREFIX}latest${TAG_SUFFIX}"
+                log_debug "  Minor tag: ${SEMVER_MAJOR}.${SEMVER_MINOR}"
+                log_debug "  Major tag: ${SEMVER_MAJOR}"
+                log_debug "  Latest tag: latest"
+            fi
+        else
+            # Non-semver tag: just use the version as-is, add latest for non-prerelease
+            if [ "$RELEASE_PRERELEASE" != "true" ]; then
+                extra_tags="type=raw,value=${TAG_PREFIX}latest${TAG_SUFFIX}"
+                log_debug "  Latest tag: latest"
+            fi
+        fi
+    else
+        # Non-release flows: existing behavior
+        local base_tag="${flow_type}-${short_sha}"
+        full_tag="${TAG_PREFIX}${base_tag}${TAG_SUFFIX}"
+        log_debug "  Base tag: ${base_tag}"
+        log_debug "  Full tag: ${full_tag}"
+    fi
+
     # =============================================================================
     # EXPORT TO GITHUB ACTIONS
     # =============================================================================
-    
+
     log_info "Exporting outputs to GitHub Actions..."
-    
+
     # Export outputs using GitHub Actions output mechanism
     {
         echo "build-flow-type=${flow_type}"
@@ -231,7 +321,23 @@ detect_build_flow() {
         echo "dockerhub-image=${DOCKERHUB_IMAGE}"
         echo "ghcr-image=${GHCR_IMAGE}"
     } >> "$GITHUB_OUTPUT"
-    
+
+    # Export extra tags (multi-line) using delimiter syntax
+    if [ -n "$extra_tags" ]; then
+        {
+            echo "extra-tags<<EXTRA_TAGS_EOF"
+            echo "$extra_tags"
+            echo "EXTRA_TAGS_EOF"
+        } >> "$GITHUB_OUTPUT"
+    else
+        echo "extra-tags=" >> "$GITHUB_OUTPUT"
+    fi
+
+    # Export release version if applicable
+    if [ "$flow_type" = "release" ]; then
+        echo "release-version=${release_version}" >> "$GITHUB_OUTPUT"
+    fi
+
     log_success "Build flow detection complete!"
     echo ""
     log_info "Summary:"
@@ -240,6 +346,13 @@ detect_build_flow() {
     echo -e "  ${CYAN}Short SHA:${NC} ${short_sha}"
     echo -e "  ${CYAN}Docker Hub:${NC} ${DOCKERHUB_IMAGE}:${full_tag}"
     echo -e "  ${CYAN}GHCR:${NC} ${GHCR_IMAGE}:${full_tag}"
+    if [ -n "$extra_tags" ]; then
+        echo -e "  ${CYAN}Additional Tags:${NC}"
+        echo "$extra_tags" | while IFS= read -r line; do
+            local tag_value="${line#type=raw,value=}"
+            echo -e "    - ${tag_value}"
+        done
+    fi
 }
 
 # =============================================================================

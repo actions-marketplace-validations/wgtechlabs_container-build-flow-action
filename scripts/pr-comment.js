@@ -88,6 +88,12 @@ module.exports = async ({github, context, core}) => {
         title: 'Staging Build',
         description: 'Pre-production validation',
         color: '#ffd700'
+      },
+      release: {
+        emoji: '🎉',
+        title: 'Release Build',
+        description: 'Production release deployment',
+        color: '#6f42c1'
       }
     };
     

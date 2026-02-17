@@ -1,5 +1,5 @@
 name: 'Container Build Flow Action'
-description: 'Automated Docker/Container builds with PR/WIP/DEV/PATCH flow support for Docker Hub and GitHub Container Registry'
+description: 'Automated Docker/Container builds with PR/WIP/DEV/PATCH/Release flow support for Docker Hub and GitHub Container Registry'
 author: 'WG Technology Labs'
 
 branding:
@@ -235,13 +235,17 @@ outputs:
     value: ${{ steps.output.outputs.build-digest }}
   
   build-flow-type:
-    description: 'Detected build flow type (pr, dev, patch, staging, wip)'
+    description: 'Detected build flow type (pr, dev, patch, staging, wip, release)'
     value: ${{ steps.output.outputs.build-flow-type }}
   
   short-sha:
     description: 'Short commit SHA used in tags'
     value: ${{ steps.output.outputs.short-sha }}
-  
+
+  release-version:
+    description: 'Clean version string from release tag (e.g., 1.2.3). Only populated for release flows.'
+    value: ${{ steps.detect.outputs.release-version }}
+
   # Security Scanning Outputs
   vulnerability-scan-completed:
     description: 'Whether vulnerability scanning completed successfully (true/false)'
@@ -292,7 +296,9 @@ runs:
         TAG_PREFIX: ${{ inputs.tag-prefix }}
         TAG_SUFFIX: ${{ inputs.tag-suffix }}
         IMAGE_NAME: ${{ inputs.image-name }}
-    
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     
@@ -398,6 +404,7 @@ runs:
           ${{ (inputs.registry == 'ghcr' || inputs.registry == 'both') && steps.detect.outputs.ghcr-image || '' }}
         tags: |
           type=raw,value=${{ steps.detect.outputs.tags }}
+          ${{ steps.detect.outputs.extra-tags }}
         labels: |
           org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
@@ -530,7 +537,7 @@ runs:
     # =============================================================================
     
     - name: Comment on Pull Request
-      if: inputs.pr-comment-enabled == 'true'
+      if: inputs.pr-comment-enabled == 'true' && github.event_name != 'release'
       uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.ghcr-token || github.token }}
