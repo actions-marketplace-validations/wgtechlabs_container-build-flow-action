@@ -19,7 +19,6 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 
 module.exports = async ({github, context, core}) => {
   try {
@@ -34,15 +33,7 @@ module.exports = async ({github, context, core}) => {
     const registry = process.env.REGISTRY || 'both';
     const resolvedSha = process.env.RESOLVED_SHA || context.sha;
     
-    // Read version from package.json
-    let actionVersion = '1.0.0'; // fallback version
-    try {
-      const packageJsonPath = path.join(__dirname, '..', 'package.json');
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      actionVersion = packageJson.version || actionVersion;
-    } catch (error) {
-      core.debug(`Could not read version from package.json: ${error.message}`);
-    }
+    const actionVersion = '1.2.0';
     
     // Security scanning environment variables
     const vulnerabilityCommentEnabled = process.env.VULNERABILITY_COMMENT_ENABLED || 'true';
