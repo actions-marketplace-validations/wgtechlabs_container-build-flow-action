@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+
+## [1.3.1] - 2026-02-22
+
+### Changed
+
+- skip per-package monorepo release tags in container builds (#20)
+
 ## [1.3.0] - 2026-02-22
 
 ### Added
